@@ -2,10 +2,11 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Category,
   Pattern,
+  patternBeats,
   patternsByCategory,
   randomPattern,
 } from './data/patterns';
-import { PracticeEngine, TempoUpConfig } from './audio/engine';
+import { AbRepeatConfig, PracticeEngine, TempoUpConfig } from './audio/engine';
 import { downloadMidi } from './audio/midi';
 import { Notation } from './components/Notation';
 
@@ -38,7 +39,15 @@ export function App() {
     maxBpm: 180,
   });
 
+  const [countIn, setCountIn] = useState(false);
+  const [ab, setAb] = useState<AbRepeatConfig>({
+    enabled: false,
+    startBeat: 0,
+    endBeat: patternBeats(pattern),
+  });
+
   const list = useMemo(() => patternsByCategory(category), [category]);
+  const totalBeats = patternBeats(pattern);
 
   // エンジンへ設定を反映
   useEffect(() => { engine.setBpm(bpm); }, [engine, bpm]);
@@ -46,7 +55,14 @@ export function App() {
   useEffect(() => { engine.setExampleEnabled(example); }, [engine, example]);
   useEffect(() => { engine.setDistinctHands(distinctHands); }, [engine, distinctHands]);
   useEffect(() => { engine.setTempoUp(tempoUp); }, [engine, tempoUp]);
+  useEffect(() => { engine.setCountIn(countIn); }, [engine, countIn]);
+  useEffect(() => { engine.setAbRepeat(ab); }, [engine, ab]);
   useEffect(() => { engine.setPattern(pattern); }, [engine, pattern]);
+
+  // パターンを変えたら A-B 範囲はリセット（全体・無効）
+  useEffect(() => {
+    setAb({ enabled: false, startBeat: 0, endBeat: patternBeats(pattern) });
+  }, [pattern]);
 
   // テンポアップでBPMが変わったらUIへ反映
   useEffect(() => {
@@ -176,6 +192,10 @@ export function App() {
                 <input type="checkbox" checked={distinctHands} onChange={(e) => setDistinctHands(e.target.checked)} />
                 左右の音色を分ける
               </label>
+              <label>
+                <input type="checkbox" checked={countIn} onChange={(e) => setCountIn(e.target.checked)} />
+                カウントイン
+              </label>
             </div>
 
             <fieldset className="tempo-up">
@@ -212,6 +232,50 @@ export function App() {
                     value={tempoUp.maxBpm}
                     onChange={(e) => setTempoUp({ ...tempoUp, maxBpm: Number(e.target.value) })}
                   />
+                </label>
+              </div>
+            </fieldset>
+
+            <fieldset className="tempo-up">
+              <legend>
+                <label>
+                  <input
+                    type="checkbox"
+                    checked={ab.enabled}
+                    onChange={(e) => setAb({ ...ab, enabled: e.target.checked })}
+                  />
+                  A-Bリピート（苦手な拍だけ繰り返す）
+                </label>
+              </legend>
+              <div className="tempo-up-row">
+                <label>
+                  A（開始拍）
+                  <select
+                    value={ab.startBeat}
+                    disabled={!ab.enabled}
+                    onChange={(e) => {
+                      const start = Number(e.target.value);
+                      setAb({ ...ab, startBeat: start, endBeat: Math.max(ab.endBeat, start + 1) });
+                    }}
+                  >
+                    {Array.from({ length: totalBeats }, (_, i) => (
+                      <option key={i} value={i}>{i + 1}</option>
+                    ))}
+                  </select>
+                </label>
+                <label>
+                  B（終了拍）
+                  <select
+                    value={ab.endBeat}
+                    disabled={!ab.enabled}
+                    onChange={(e) => setAb({ ...ab, endBeat: Number(e.target.value) })}
+                  >
+                    {Array.from({ length: totalBeats }, (_, i) => i + 1)
+                      .filter((b) => b > ab.startBeat)
+                      .map((b) => (
+                        <option key={b} value={b}>{b}</option>
+                      ))}
+                  </select>
                 </label>
               </div>
             </fieldset>

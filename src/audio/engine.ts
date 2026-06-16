@@ -11,6 +11,14 @@ export interface TempoUpConfig {
   maxBpm: number;
 }
 
+export interface AbRepeatConfig {
+  enabled: boolean;
+  /** ループ開始拍（0始まり） */
+  startBeat: number;
+  /** ループ終了拍（この拍の手前まで。startBeat より大きいこと） */
+  endBeat: number;
+}
+
 const STEP_NOTATION: Record<number, string> = {
   2: '8n',
   3: '8t',
@@ -42,6 +50,9 @@ export class PracticeEngine {
     stepBpm: 5,
     maxBpm: 200,
   };
+
+  private countIn = false;
+  private ab: AbRepeatConfig = { enabled: false, startBeat: 0, endBeat: 0 };
 
   private beatCount = 0;
 
@@ -101,6 +112,19 @@ export class PracticeEngine {
     this.tempoUp = cfg;
   }
 
+  setCountIn(v: boolean): void {
+    this.countIn = v;
+  }
+
+  /** A-Bリピート設定。再生中なら作り直して反映 */
+  setAbRepeat(cfg: AbRepeatConfig): void {
+    this.ab = cfg;
+    if (this.isPlaying) {
+      this.rebuild();
+      Tone.getTransport().position = 0;
+    }
+  }
+
   get isPlaying(): boolean {
     return Tone.getTransport().state === 'started';
   }
@@ -119,38 +143,54 @@ export class PracticeEngine {
 
     const p = this.pattern;
     const step = STEP_NOTATION[p.subdivision] ?? '16n';
-    const beatsPerLoop = patternBeats(p);
+    const sub = p.subdivision;
+    const totalBeats = patternBeats(p);
 
-    // お手本（パターン）再生
+    // A-Bリピート範囲（拍）を決定。無効/不正なら全体。
+    let aBeat = 0;
+    let bBeat = totalBeats;
+    if (this.ab.enabled) {
+      aBeat = Math.max(0, Math.min(this.ab.startBeat, totalBeats - 1));
+      bBeat = Math.max(aBeat + 1, Math.min(this.ab.endBeat, totalBeats));
+    }
+    const beatsPerLoop = bBeat - aBeat;
+    const windowNotes = p.notes.slice(aBeat * sub, bBeat * sub);
+
+    // カウントイン（1ループ分のクリック）を行う場合の先頭オフセット拍数
+    const countInBeats = this.countIn ? beatsPerLoop : 0;
+
+    // お手本（パターン）再生 ※カウントイン分だけ遅らせて開始
     this.patternSeq = new Tone.Sequence(
       (time, idx: number) => {
         if (!this.exampleEnabled) return;
-        const note = p.notes[idx];
+        const note = windowNotes[idx];
         const velocity = note.accent ? 1.0 : 0.5;
         const synth = this.distinctHands && note.hand === 'L' ? this.lHand : this.rHand;
         const pitch = note.hand === 'R' ? 'C2' : this.distinctHands ? 'G2' : 'C2';
         synth.triggerAttackRelease(pitch, '32n', time, velocity);
       },
-      p.notes.map((_, i) => i),
+      windowNotes.map((_, i) => i),
       step,
     );
     this.patternSeq.loop = true;
-    this.patternSeq.start(0);
+    this.patternSeq.start(countInBeats > 0 ? `0:${countInBeats}:0` : 0);
 
     // クリック（拍ごと）＋ テンポアップ用のループカウント
     this.beatCount = 0;
     this.clickLoop = new Tone.Loop((time) => {
-      const beatInLoop = this.beatCount % beatsPerLoop;
+      // カウントイン中は rel<0。ループ内の相対拍を求める。
+      const rel = this.beatCount - countInBeats;
+      const beatInLoop = ((rel % beatsPerLoop) + beatsPerLoop) % beatsPerLoop;
 
       if (this.clickEnabled) {
         const accent = beatInLoop === 0;
         this.clickSynth.triggerAttackRelease(accent ? 'C6' : 'G5', '32n', time, accent ? 1 : 0.7);
       }
 
-      // ループ末尾（次の頭の手前）でテンポアップ判定
+      // ループ末尾でテンポアップ判定（カウントインはループに数えない）
       this.beatCount += 1;
-      if (this.beatCount % beatsPerLoop === 0) {
-        const loops = this.beatCount / beatsPerLoop;
+      if (rel >= 0 && (rel + 1) % beatsPerLoop === 0) {
+        const loops = (rel + 1) / beatsPerLoop;
         if (this.tempoUp.enabled && loops % this.tempoUp.everyLoops === 0) {
           const next = Math.min(this.bpm + this.tempoUp.stepBpm, this.tempoUp.maxBpm);
           if (next !== this.bpm) {
