@@ -49,7 +49,13 @@ export function Notation({ pattern, showSticking }: Props) {
 
     const beats = patternBeats(pattern);
     const containerWidth = width || host.clientWidth || 800;
-    const svgWidth = Math.max(containerWidth - 4, 120 + pattern.notes.length * 34);
+
+    // 「自然な幅」= 音符が重ならない最小幅。前打音(フラム/ドラッグ)の数も加味。
+    const graceCount = pattern.notes.reduce((s, n) => s + (n.graces?.length ?? 0), 0);
+    const contentWidth = 100 + pattern.notes.length * 38 + graceCount * 16;
+    // コンテナ以上の幅で描画 → 後で viewBox で縮小して必ず画面内に収める
+    // （コンテナより content が小さいときは拡大しすぎないようコンテナ幅で描く）
+    const svgWidth = Math.max(containerWidth, contentWidth);
     const height = 170;
 
     const renderer = new Renderer(host, Renderer.Backends.SVG);
@@ -115,6 +121,15 @@ export function Notation({ pattern, showSticking }: Props) {
     voice.draw(ctx, stave);
     beams.forEach((b) => b.setContext(ctx).draw());
     tuplets.forEach((t) => t.setContext(ctx).draw());
+
+    // 描画したSVGを viewBox 化し、横幅100%で必ずコンテナに収める（横スクロール無し）
+    const svg = host.querySelector('svg');
+    if (svg) {
+      svg.setAttribute('viewBox', `0 0 ${svgWidth} ${height}`);
+      svg.setAttribute('preserveAspectRatio', 'xMidYMid meet');
+      svg.setAttribute('width', '100%');
+      svg.removeAttribute('height');
+    }
   }, [pattern, showSticking, width]);
 
   return <div className="notation" ref={hostRef} />;

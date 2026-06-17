@@ -89,10 +89,9 @@ body {
   background: #fbfbf7;
   border-radius: 10px;
   padding: 6px;
-  overflow-x: auto;
-  -webkit-overflow-scrolling: touch;
+  overflow: hidden; /* 横スクロールさせず、必ず内側に収める */
 }
-.notation svg { display: block; }
+.notation svg { display: block; width: 100%; height: auto; }
 
 /* テンポ操作 */
 .tempo-slider {
