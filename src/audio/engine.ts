@@ -1,5 +1,5 @@
 import * as Tone from 'tone';
-import { Pattern, patternBeats } from '../data/patterns';
+import { Hand, Pattern, patternBeats } from '../data/patterns';
 
 export interface TempoUpConfig {
   enabled: boolean;
@@ -11,14 +11,6 @@ export interface TempoUpConfig {
   maxBpm: number;
 }
 
-export interface AbRepeatConfig {
-  enabled: boolean;
-  /** ループ開始拍（0始まり） */
-  startBeat: number;
-  /** ループ終了拍（この拍の手前まで。startBeat より大きいこと） */
-  endBeat: number;
-}
-
 const STEP_NOTATION: Record<number, string> = {
   2: '8n',
   3: '8t',
@@ -26,10 +18,13 @@ const STEP_NOTATION: Record<number, string> = {
   6: '16t',
 };
 
+// 前打音（フラム/ドラッグ）を主音の何秒前に置くか
+const GRACE_SPACING = 0.035;
+
 /**
  * 練習用オーディオエンジン。
  * - クリック（メトロノーム）
- * - パターン（お手本）再生：R/Lで音色を分け、アクセントは強く鳴らす
+ * - パターン（お手本）再生：アクセントは強く、フラム/ドラッグは前打音を鳴らす
  * - テンポアップ：一定ループごとにBPMを自動で上げる
  */
 export class PracticeEngine {
@@ -42,8 +37,8 @@ export class PracticeEngine {
 
   private pattern: Pattern | null = null;
   private clickEnabled = true;
-  private exampleEnabled = true;
-  private distinctHands = true;
+  private exampleEnabled = false;   // デフォルトOFF
+  private distinctHands = false;    // デフォルトOFF
   private tempoUp: TempoUpConfig = {
     enabled: false,
     everyLoops: 2,
@@ -52,8 +47,6 @@ export class PracticeEngine {
   };
 
   private countIn = false;
-  private ab: AbRepeatConfig = { enabled: false, startBeat: 0, endBeat: 0 };
-
   private beatCount = 0;
 
   /** BPM変化を外部へ通知（テンポアップ時のUI更新用） */
@@ -116,15 +109,6 @@ export class PracticeEngine {
     this.countIn = v;
   }
 
-  /** A-Bリピート設定。再生中なら作り直して反映 */
-  setAbRepeat(cfg: AbRepeatConfig): void {
-    this.ab = cfg;
-    if (this.isPlaying) {
-      this.rebuild();
-      Tone.getTransport().position = 0;
-    }
-  }
-
   get isPlaying(): boolean {
     return Tone.getTransport().state === 'started';
   }
@@ -137,24 +121,20 @@ export class PracticeEngine {
     }
   }
 
+  /** 1打を発音 */
+  private strike(hand: Hand, velocity: number, time: number): void {
+    const synth = this.distinctHands && hand === 'L' ? this.lHand : this.rHand;
+    const pitch = hand === 'R' ? 'C2' : this.distinctHands ? 'G2' : 'C2';
+    synth.triggerAttackRelease(pitch, '32n', time, velocity);
+  }
+
   private rebuild(): void {
     this.disposeSequences();
     if (!this.pattern) return;
 
     const p = this.pattern;
     const step = STEP_NOTATION[p.subdivision] ?? '16n';
-    const sub = p.subdivision;
-    const totalBeats = patternBeats(p);
-
-    // A-Bリピート範囲（拍）を決定。無効/不正なら全体。
-    let aBeat = 0;
-    let bBeat = totalBeats;
-    if (this.ab.enabled) {
-      aBeat = Math.max(0, Math.min(this.ab.startBeat, totalBeats - 1));
-      bBeat = Math.max(aBeat + 1, Math.min(this.ab.endBeat, totalBeats));
-    }
-    const beatsPerLoop = bBeat - aBeat;
-    const windowNotes = p.notes.slice(aBeat * sub, bBeat * sub);
+    const beatsPerLoop = patternBeats(p);
 
     // カウントイン（1ループ分のクリック）を行う場合の先頭オフセット拍数
     const countInBeats = this.countIn ? beatsPerLoop : 0;
@@ -163,13 +143,20 @@ export class PracticeEngine {
     this.patternSeq = new Tone.Sequence(
       (time, idx: number) => {
         if (!this.exampleEnabled) return;
-        const note = windowNotes[idx];
-        const velocity = note.accent ? 1.0 : 0.5;
-        const synth = this.distinctHands && note.hand === 'L' ? this.lHand : this.rHand;
-        const pitch = note.hand === 'R' ? 'C2' : this.distinctHands ? 'G2' : 'C2';
-        synth.triggerAttackRelease(pitch, '32n', time, velocity);
+        const note = p.notes[idx];
+
+        // 前打音（フラム/ドラッグ）を主音の手前に鳴らす
+        if (note.graces && note.graces.length > 0) {
+          const n = note.graces.length;
+          note.graces.forEach((g, gi) => {
+            const t = time - GRACE_SPACING * (n - gi);
+            this.strike(g, 0.3, Math.max(0, t));
+          });
+        }
+
+        this.strike(note.hand, note.accent ? 1.0 : 0.5, time);
       },
-      windowNotes.map((_, i) => i),
+      p.notes.map((_, i) => i),
       step,
     );
     this.patternSeq.loop = true;

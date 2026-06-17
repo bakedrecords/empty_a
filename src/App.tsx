@@ -2,16 +2,36 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Category,
   Pattern,
-  patternBeats,
   patternsByCategory,
   randomPattern,
 } from './data/patterns';
-import { AbRepeatConfig, PracticeEngine, TempoUpConfig } from './audio/engine';
-import { downloadMidi } from './audio/midi';
+import { PracticeEngine, TempoUpConfig } from './audio/engine';
 import { Notation } from './components/Notation';
 
 const MIN_BPM = 40;
 const MAX_BPM = 260;
+
+/** トグル用のピルボタン */
+function Toggle({
+  on,
+  onChange,
+  children,
+}: {
+  on: boolean;
+  onChange: (v: boolean) => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      className={on ? 'pill on' : 'pill'}
+      aria-pressed={on}
+      onClick={() => onChange(!on)}
+    >
+      {children}
+    </button>
+  );
+}
 
 export function App() {
   const engineRef = useRef<PracticeEngine | null>(null);
@@ -28,9 +48,9 @@ export function App() {
   const [playing, setPlaying] = useState(false);
 
   const [click, setClick] = useState(true);
-  const [example, setExample] = useState(true);
+  const [example, setExample] = useState(false);       // デフォルトOFF
   const [sticking, setSticking] = useState(true);
-  const [distinctHands, setDistinctHands] = useState(true);
+  const [distinctHands, setDistinctHands] = useState(false); // デフォルトOFF
 
   const [tempoUp, setTempoUp] = useState<TempoUpConfig>({
     enabled: false,
@@ -38,16 +58,20 @@ export function App() {
     stepBpm: 5,
     maxBpm: 180,
   });
-
   const [countIn, setCountIn] = useState(false);
-  const [ab, setAb] = useState<AbRepeatConfig>({
-    enabled: false,
-    startBeat: 0,
-    endBeat: patternBeats(pattern),
-  });
 
   const list = useMemo(() => patternsByCategory(category), [category]);
-  const totalBeats = patternBeats(pattern);
+
+  // グループ（ロール/ディドル/フラム/ドラッグ等）ごとに分けて <optgroup> 化
+  const grouped = useMemo(() => {
+    const map = new Map<string, Pattern[]>();
+    for (const p of list) {
+      const g = p.group ?? 'その他';
+      if (!map.has(g)) map.set(g, []);
+      map.get(g)!.push(p);
+    }
+    return [...map.entries()];
+  }, [list]);
 
   // エンジンへ設定を反映
   useEffect(() => { engine.setBpm(bpm); }, [engine, bpm]);
@@ -56,13 +80,7 @@ export function App() {
   useEffect(() => { engine.setDistinctHands(distinctHands); }, [engine, distinctHands]);
   useEffect(() => { engine.setTempoUp(tempoUp); }, [engine, tempoUp]);
   useEffect(() => { engine.setCountIn(countIn); }, [engine, countIn]);
-  useEffect(() => { engine.setAbRepeat(ab); }, [engine, ab]);
   useEffect(() => { engine.setPattern(pattern); }, [engine, pattern]);
-
-  // パターンを変えたら A-B 範囲はリセット（全体・無効）
-  useEffect(() => {
-    setAb({ enabled: false, startBeat: 0, endBeat: patternBeats(pattern) });
-  }, [pattern]);
 
   // テンポアップでBPMが変わったらUIへ反映
   useEffect(() => {
@@ -74,8 +92,7 @@ export function App() {
 
   function changeCategory(c: Category) {
     setCategory(c);
-    const first = patternsByCategory(c)[0];
-    setPattern(first);
+    setPattern(patternsByCategory(c)[0]);
   }
 
   async function togglePlay() {
@@ -92,11 +109,19 @@ export function App() {
     setPattern((cur) => randomPattern(category, cur.id));
   }
 
+  function selectById(id: string) {
+    const found = list.find((p) => p.id === id);
+    if (found) setPattern(found);
+  }
+
+  function nudge(d: number) {
+    setBpm((b) => Math.min(MAX_BPM, Math.max(MIN_BPM, b + d)));
+  }
+
   return (
     <div className="app">
       <header className="app-header">
         <h1>🥁 Drum Trainer</h1>
-        <p className="subtitle">ルーディメンツ / アクセント移動 練習</p>
       </header>
 
       <div className="tabs">
@@ -114,182 +139,98 @@ export function App() {
         </button>
       </div>
 
-      <div className="layout">
-        <aside className="sidebar">
-          <h2>メニュー</h2>
-          <ul className="pattern-list">
-            {list.map((p) => (
-              <li key={p.id}>
-                <button
-                  className={p.id === pattern.id ? 'item active' : 'item'}
-                  onClick={() => setPattern(p)}
-                >
-                  {p.name}
-                </button>
-              </li>
-            ))}
-          </ul>
-          <button className="random" onClick={pickRandom}>
-            🎲 ランダム出題
-          </button>
-        </aside>
-
-        <main className="main">
-          <div className="card">
-            <div className="card-title">
-              <h2>{pattern.name}</h2>
-              {pattern.hint && <span className="hint">{pattern.hint}</span>}
-            </div>
-            <Notation pattern={pattern} showSticking={sticking} />
-          </div>
-
-          <div className="card controls">
-            <div className="transport">
-              <button className={playing ? 'play stop' : 'play'} onClick={togglePlay}>
-                {playing ? '■ 停止' : '▶ 再生'}
-              </button>
-              <div className="bpm">
-                <span className="bpm-value">{bpm}</span>
-                <span className="bpm-unit">BPM</span>
-              </div>
-            </div>
-
-            <input
-              className="tempo-slider"
-              type="range"
-              min={MIN_BPM}
-              max={MAX_BPM}
-              value={bpm}
-              onChange={(e) => setBpm(Number(e.target.value))}
-            />
-            <div className="bpm-buttons">
-              {[-10, -5, -1, +1, +5, +10].map((d) => (
-                <button
-                  key={d}
-                  onClick={() =>
-                    setBpm((b) => Math.min(MAX_BPM, Math.max(MIN_BPM, b + d)))
-                  }
-                >
-                  {d > 0 ? `+${d}` : d}
-                </button>
+      <div className="picker">
+        <select
+          className="pattern-select"
+          value={pattern.id}
+          onChange={(e) => selectById(e.target.value)}
+        >
+          {grouped.map(([g, items]) => (
+            <optgroup key={g} label={g}>
+              {items.map((p) => (
+                <option key={p.id} value={p.id}>{p.name}</option>
               ))}
-            </div>
-
-            <div className="toggles">
-              <label>
-                <input type="checkbox" checked={click} onChange={(e) => setClick(e.target.checked)} />
-                クリック
-              </label>
-              <label>
-                <input type="checkbox" checked={example} onChange={(e) => setExample(e.target.checked)} />
-                お手本再生
-              </label>
-              <label>
-                <input type="checkbox" checked={sticking} onChange={(e) => setSticking(e.target.checked)} />
-                手順(R/L)表示
-              </label>
-              <label>
-                <input type="checkbox" checked={distinctHands} onChange={(e) => setDistinctHands(e.target.checked)} />
-                左右の音色を分ける
-              </label>
-              <label>
-                <input type="checkbox" checked={countIn} onChange={(e) => setCountIn(e.target.checked)} />
-                カウントイン
-              </label>
-            </div>
-
-            <fieldset className="tempo-up">
-              <legend>
-                <label>
-                  <input
-                    type="checkbox"
-                    checked={tempoUp.enabled}
-                    onChange={(e) => setTempoUp({ ...tempoUp, enabled: e.target.checked })}
-                  />
-                  テンポアップ
-                </label>
-              </legend>
-              <div className="tempo-up-row">
-                <label>
-                  <input
-                    type="number" min={1} max={32}
-                    value={tempoUp.everyLoops}
-                    onChange={(e) => setTempoUp({ ...tempoUp, everyLoops: Number(e.target.value) })}
-                  />
-                  ループごと
-                </label>
-                <label>
-                  +<input
-                    type="number" min={1} max={20}
-                    value={tempoUp.stepBpm}
-                    onChange={(e) => setTempoUp({ ...tempoUp, stepBpm: Number(e.target.value) })}
-                  />
-                  BPM
-                </label>
-                <label>
-                  上限<input
-                    type="number" min={MIN_BPM} max={MAX_BPM}
-                    value={tempoUp.maxBpm}
-                    onChange={(e) => setTempoUp({ ...tempoUp, maxBpm: Number(e.target.value) })}
-                  />
-                </label>
-              </div>
-            </fieldset>
-
-            <fieldset className="tempo-up">
-              <legend>
-                <label>
-                  <input
-                    type="checkbox"
-                    checked={ab.enabled}
-                    onChange={(e) => setAb({ ...ab, enabled: e.target.checked })}
-                  />
-                  A-Bリピート（苦手な拍だけ繰り返す）
-                </label>
-              </legend>
-              <div className="tempo-up-row">
-                <label>
-                  A（開始拍）
-                  <select
-                    value={ab.startBeat}
-                    disabled={!ab.enabled}
-                    onChange={(e) => {
-                      const start = Number(e.target.value);
-                      setAb({ ...ab, startBeat: start, endBeat: Math.max(ab.endBeat, start + 1) });
-                    }}
-                  >
-                    {Array.from({ length: totalBeats }, (_, i) => (
-                      <option key={i} value={i}>{i + 1}</option>
-                    ))}
-                  </select>
-                </label>
-                <label>
-                  B（終了拍）
-                  <select
-                    value={ab.endBeat}
-                    disabled={!ab.enabled}
-                    onChange={(e) => setAb({ ...ab, endBeat: Number(e.target.value) })}
-                  >
-                    {Array.from({ length: totalBeats }, (_, i) => i + 1)
-                      .filter((b) => b > ab.startBeat)
-                      .map((b) => (
-                        <option key={b} value={b}>{b}</option>
-                      ))}
-                  </select>
-                </label>
-              </div>
-            </fieldset>
-
-            <button className="midi" onClick={() => downloadMidi(pattern, bpm)}>
-              ⬇ MIDI（お手本）を書き出す
-            </button>
-          </div>
-        </main>
+            </optgroup>
+          ))}
+        </select>
+        <button className="random" onClick={pickRandom} aria-label="ランダム出題">🎲</button>
       </div>
 
-      <footer className="app-footer">
-        <small>練習のヒント：まずゆっくり正確に → テンポアップで限界を少しずつ上げる。</small>
-      </footer>
+      <section className="card">
+        <div className="card-title">
+          <h2>{pattern.name}</h2>
+          {pattern.hint && <p className="hint">{pattern.hint}</p>}
+        </div>
+        <Notation pattern={pattern} showSticking={sticking} />
+      </section>
+
+      <section className="card">
+        <input
+          className="tempo-slider"
+          type="range"
+          min={MIN_BPM}
+          max={MAX_BPM}
+          value={bpm}
+          onChange={(e) => setBpm(Number(e.target.value))}
+          aria-label="テンポ"
+        />
+        <div className="bpm-buttons">
+          <button onClick={() => nudge(-5)}>−5</button>
+          <button onClick={() => nudge(-1)}>−1</button>
+          <button onClick={() => nudge(+1)}>＋1</button>
+          <button onClick={() => nudge(+5)}>＋5</button>
+        </div>
+
+        <div className="settings">
+          <Toggle on={click} onChange={setClick}>クリック</Toggle>
+          <Toggle on={sticking} onChange={setSticking}>手順 R/L</Toggle>
+          <Toggle on={countIn} onChange={setCountIn}>カウントイン</Toggle>
+          <Toggle on={example} onChange={setExample}>お手本再生</Toggle>
+          <Toggle on={distinctHands} onChange={setDistinctHands}>左右で音色</Toggle>
+        </div>
+
+        <details className="advanced">
+          <summary>テンポアップ</summary>
+          <div className="tempo-up-row">
+            <Toggle on={tempoUp.enabled} onChange={(v) => setTempoUp({ ...tempoUp, enabled: v })}>
+              有効
+            </Toggle>
+            <label>
+              <input
+                type="number" min={1} max={32}
+                value={tempoUp.everyLoops}
+                onChange={(e) => setTempoUp({ ...tempoUp, everyLoops: Number(e.target.value) })}
+              />
+              ループごと
+            </label>
+            <label>
+              +<input
+                type="number" min={1} max={20}
+                value={tempoUp.stepBpm}
+                onChange={(e) => setTempoUp({ ...tempoUp, stepBpm: Number(e.target.value) })}
+              />
+              BPM
+            </label>
+            <label>
+              上限<input
+                type="number" min={MIN_BPM} max={MAX_BPM}
+                value={tempoUp.maxBpm}
+                onChange={(e) => setTempoUp({ ...tempoUp, maxBpm: Number(e.target.value) })}
+              />
+            </label>
+          </div>
+        </details>
+      </section>
+
+      <div className="transport-bar">
+        <div className="bpm">
+          <span className="bpm-value">{bpm}</span>
+          <span className="bpm-unit">BPM</span>
+        </div>
+        <button className={playing ? 'play stop' : 'play'} onClick={togglePlay}>
+          {playing ? '■ 停止' : '▶ 再生'}
+        </button>
+      </div>
     </div>
   );
 }

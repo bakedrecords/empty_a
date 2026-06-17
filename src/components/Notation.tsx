@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   Renderer,
   Stave,
@@ -9,6 +9,8 @@ import {
   Voice,
   Annotation,
   Articulation,
+  GraceNote,
+  GraceNoteGroup,
 } from 'vexflow';
 import { Pattern, patternBeats } from '../data/patterns';
 
@@ -27,6 +29,18 @@ const DURATION: Record<number, string> = {
 /** VexFlow による1段譜の描画（パーカッション単線譜） */
 export function Notation({ pattern, showSticking }: Props) {
   const hostRef = useRef<HTMLDivElement>(null);
+  const [width, setWidth] = useState(0);
+
+  // コンテナ幅の変化（画面回転・リサイズ）で再描画
+  useEffect(() => {
+    const host = hostRef.current;
+    if (!host) return;
+    const ro = new ResizeObserver((entries) => {
+      setWidth(Math.round(entries[0].contentRect.width));
+    });
+    ro.observe(host);
+    return () => ro.disconnect();
+  }, []);
 
   useEffect(() => {
     const host = hostRef.current;
@@ -34,15 +48,15 @@ export function Notation({ pattern, showSticking }: Props) {
     host.innerHTML = '';
 
     const beats = patternBeats(pattern);
-    const containerWidth = host.clientWidth || 800;
-    const width = Math.max(containerWidth - 4, 120 + pattern.notes.length * 34);
+    const containerWidth = width || host.clientWidth || 800;
+    const svgWidth = Math.max(containerWidth - 4, 120 + pattern.notes.length * 34);
     const height = 170;
 
     const renderer = new Renderer(host, Renderer.Backends.SVG);
-    renderer.resize(width, height);
+    renderer.resize(svgWidth, height);
     const ctx = renderer.getContext();
 
-    const stave = new Stave(8, 30, width - 16);
+    const stave = new Stave(8, 30, svgWidth - 16);
     stave.setNumLines(1);
     stave.addClef('percussion');
     stave.setContext(ctx).draw();
@@ -51,6 +65,18 @@ export function Notation({ pattern, showSticking }: Props) {
 
     const notes = pattern.notes.map((n) => {
       const sn = new StaveNote({ keys: ['b/4'], duration, stem_direction: 1 });
+
+      // フラム / ドラッグ（前打音）
+      if (n.graces && n.graces.length > 0) {
+        const isFlam = n.graces.length === 1;
+        const graceNotes = n.graces.map(
+          () => new GraceNote({ keys: ['b/4'], duration: '8', slash: isFlam, stem_direction: 1 }),
+        );
+        const group = new GraceNoteGroup(graceNotes, false);
+        if (graceNotes.length > 1) group.beamNotes();
+        sn.addModifier(group, 0);
+      }
+
       if (n.accent) {
         sn.addModifier(new Articulation('a>').setPosition(3), 0);
       }
@@ -84,12 +110,12 @@ export function Notation({ pattern, showSticking }: Props) {
 
     const voice = new Voice({ num_beats: beats, beat_value: 4 }).setStrict(false);
     voice.addTickables(notes);
-    new Formatter().joinVoices([voice]).format([voice], width - 90);
+    new Formatter().joinVoices([voice]).format([voice], svgWidth - 90);
 
     voice.draw(ctx, stave);
     beams.forEach((b) => b.setContext(ctx).draw());
     tuplets.forEach((t) => t.setContext(ctx).draw());
-  }, [pattern, showSticking]);
+  }, [pattern, showSticking, width]);
 
   return <div className="notation" ref={hostRef} />;
 }
