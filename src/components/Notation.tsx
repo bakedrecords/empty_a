@@ -127,8 +127,12 @@ export function Notation({ pattern, showSticking }: Props) {
     if (svg) {
       svg.setAttribute('viewBox', `0 0 ${svgWidth} ${height}`);
       svg.setAttribute('preserveAspectRatio', 'xMidYMid meet');
-      svg.setAttribute('width', '100%');
+      svg.removeAttribute('width');
       svg.removeAttribute('height');
+      // 属性だけでなくインラインstyleでも上書き（VexFlowの指定に確実に勝つ）
+      svg.style.width = '100%';
+      svg.style.height = 'auto';
+      svg.style.display = 'block';
     }
   }, [pattern, showSticking, width]);
 
