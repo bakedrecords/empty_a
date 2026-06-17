@@ -123,9 +123,16 @@ export class PracticeEngine {
 
   /** 1打を発音 */
   private strike(hand: Hand, velocity: number, time: number): void {
-    const synth = this.distinctHands && hand === 'L' ? this.lHand : this.rHand;
-    const pitch = hand === 'R' ? 'C2' : this.distinctHands ? 'G2' : 'C2';
-    synth.triggerAttackRelease(pitch, '32n', time, velocity);
+    if (!this.distinctHands) {
+      this.rHand.triggerAttackRelease('C2', '32n', time, velocity);
+      return;
+    }
+    // 左右の音を入れ替え：R は G2(lHand)、L は C2(rHand)
+    if (hand === 'R') {
+      this.lHand.triggerAttackRelease('G2', '32n', time, velocity);
+    } else {
+      this.rHand.triggerAttackRelease('C2', '32n', time, velocity);
+    }
   }
 
   private rebuild(): void {
