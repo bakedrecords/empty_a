@@ -83,7 +83,8 @@ body {
   margin-bottom: 12px;
 }
 .card-title h2 { margin: 0 0 2px; font-size: 18px; }
-.hint { margin: 0 0 8px; color: var(--muted); font-size: 13px; }
+/* 説明書きの有無で譜面位置がずれないよう、行の高さを常に確保 */
+.hint { margin: 0 0 8px; color: var(--muted); font-size: 13px; min-height: 1.2em; }
 
 .notation {
   background: #fbfbf7;

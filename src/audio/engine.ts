@@ -42,7 +42,7 @@ export class PracticeEngine {
   private tempoUp: TempoUpConfig = {
     enabled: false,
     everyLoops: 2,
-    stepBpm: 5,
+    stepBpm: 2,
     maxBpm: 200,
   };
 

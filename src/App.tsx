@@ -55,7 +55,7 @@ export function App() {
   const [tempoUp, setTempoUp] = useState<TempoUpConfig>({
     enabled: false,
     everyLoops: 2,
-    stepBpm: 5,
+    stepBpm: 2,
     maxBpm: 180,
   });
   const [countIn, setCountIn] = useState(false);
@@ -159,7 +159,7 @@ export function App() {
       <section className="card">
         <div className="card-title">
           <h2>{pattern.name}</h2>
-          {pattern.hint && <p className="hint">{pattern.hint}</p>}
+          <p className="hint">{pattern.hint ?? ''}</p>
         </div>
         <Notation pattern={pattern} showSticking={sticking} />
       </section>
